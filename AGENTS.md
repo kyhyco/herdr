@@ -91,6 +91,16 @@ just check              # formatting check + cargo nextest + maintenance script 
 
 Run `just check` before committing unless Can explicitly accepts narrower validation. Do not bypass failing checks; fix the failure or explain exactly why a narrower check is enough.
 
+### Local builds
+
+The vendored libghostty-vt (`build.rs`) requires Zig **0.15.2**; a newer system Zig (for example Homebrew 0.16.x) fails the build. Use the repo Nix flake to get the pinned toolchain instead of installing Zig by hand.
+
+- `nix build .#herdr` produces a hermetic `ReleaseFast` binary at `result/bin/herdr`. Use this to install a local release build (for example copy it to `~/.local/bin/herdr`).
+- `nix develop` opens a dev shell with `zig_0_15`, `cargo`, `just`, `cargo-nextest`, and friends; run `just check` and `cargo` inside it.
+- Without Nix, point Cargo at a 0.15.2 Zig: `ZIG="$(brew --prefix zig@0.15)/bin/zig"` (this is how `nix/package.nix` resolves it).
+
+A rebuilt binary only takes effect once the **server** runs it (the headless server renders and runs pane detection; the client just blits frames). Restart or hand off the server after installing.
+
 Unit tests live next to the code (`#[cfg(test)] mod tests`). New `AppState` or `Workspace` behavior should be testable with `AppState::test_new()` and `Workspace::test_new()` without PTYs.
 
 For broad refactors or release-risk regressions, classify the risk before editing. Treat changes as refactor-risk when they touch two or more core surfaces, persisted state, protocol/API IDs, workspace/tab/pane identity, restore/handoff, agent detection authority, or UI/input state projection. Before moving code, identify the protected behavior and add or name characterization tests. Identity/state refactors should use the test-only invariants `AppState::assert_invariants_for_test()` or `Workspace::assert_invariants_for_test()` with adversarial state from `AppState::test_with_adversarial_identity_state()` or `Workspace::test_adversarial_identity_state()`. Run a roundtable for broad refactors and release-risk regressions, not for routine local fixes.
