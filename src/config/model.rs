@@ -812,6 +812,10 @@ pub struct UiConfig {
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
+    /// Marker appended to a tab's label while that tab is zoomed. Default: "Z".
+    /// Set to any string (for example "•" or ".") to change the glyph, or ""
+    /// to hide the marker entirely.
+    pub zoom_indicator: String,
     /// Dim inactive split panes so the focused pane stands out, including while
     /// a pane is active in terminal mode. Default: false.
     pub pane_dim: bool,
@@ -1013,6 +1017,7 @@ impl Default for UiConfig {
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
+            zoom_indicator: "Z".into(),
             pane_dim: false,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),

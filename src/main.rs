@@ -312,6 +312,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Hide the tab row when a workspace has exactly one tab.
 # New tabs can still be created with the configured keybinding.
 # hide_tab_bar_when_single_tab = false
+
+# Marker appended to a tab's label while that tab is zoomed.
+# Set any string (for example "•" or ".") to change the glyph, or "" to hide it.
+# zoom_indicator = "Z"
+
 # Dim inactive split panes so the focused pane stands out, including in terminal mode.
 # pane_dim = false
 

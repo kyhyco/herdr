@@ -1509,6 +1509,8 @@ pub struct AppState {
     pub prompt_new_workspace_name: bool,
     pub pane_borders: bool,
     pub pane_gaps: bool,
+    /// Marker appended to a zoomed tab's label. Empty hides it. Sourced from `ui.zoom_indicator`.
+    pub zoom_indicator: String,
     pub show_agent_labels_on_pane_borders: bool,
     pub hide_tab_bar_when_single_tab: bool,
     pub pane_dim: bool,
@@ -1891,6 +1893,7 @@ impl AppState {
             prompt_new_workspace_name: false,
             pane_borders: true,
             pane_gaps: false,
+            zoom_indicator: "Z".into(),
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             pane_dim: false,
