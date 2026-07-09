@@ -358,6 +358,10 @@ pub(super) fn render_panes(
                             dim_bg_fallback,
                             &app.host_ansi_palette,
                         );
+                        // Dim the border ring and scrollbar gutter too. Borders
+                        // are drawn later (fg only), so setting the background
+                        // now makes the glyphs inherit the dimmed background.
+                        dim_pane_chrome_background(app, frame, info, dim_bg_fallback);
                     } else if !terminal_active {
                         dim_pane_with_modifier(frame, info.inner_rect);
                     }
@@ -908,6 +912,59 @@ fn dim_pane_content(
                 dimmed = dimmed.bg(bg);
             }
             cell.set_style(dimmed);
+        }
+    }
+}
+
+/// Dim the background of an inactive pane's *chrome* - the cells inside
+/// `info.rect` but outside `info.inner_rect` (the border ring and the stable
+/// scrollbar gutter). `dim_pane_content` only dims `info.inner_rect`, and the
+/// border glyphs `render_pane_borders` draws afterwards set foreground only, so
+/// without this pass the chrome keeps the undimmed host background and shows as
+/// an undimmed ring around a dimmed pane.
+///
+/// Background only: foreground and modifiers are left untouched so the later
+/// border pass can still color borders with the focus accent vs `overlay0`.
+/// Runs before `render_pane_borders`, which relies on `set_style` preserving the
+/// background it does not override, so the border glyphs inherit this dim.
+///
+/// The whole rect is dimmed, including a divider shared with a focused
+/// neighbour. `apply_pane_chrome` drops `Borders::RIGHT`/`BOTTOM` from the pane
+/// that has a neighbour, so a divider cell is always owned by exactly one pane's
+/// rect, and pane rects partition the terminal area without overlapping. Dimming
+/// `info.rect` therefore never touches a focused pane's cells, and it keeps an
+/// inactive pane dim across its entire frame.
+fn dim_pane_chrome_background(
+    app: &AppState,
+    frame: &mut Frame,
+    info: &PaneInfo,
+    bg_fallback: Option<Rgb>,
+) {
+    let mut scaled = HashMap::new();
+    let Some(dimmed_bg) = dim_color(
+        Color::Reset,
+        bg_fallback,
+        &app.host_ansi_palette,
+        &mut scaled,
+    ) else {
+        // No background fallback available; nothing to dim against.
+        return;
+    };
+
+    let rect = info.rect;
+    let inner = info.inner_rect;
+    let buf = frame.buffer_mut();
+    let area = buf.area;
+    for y in rect.y..rect.bottom() {
+        for x in rect.x..rect.right() {
+            // Interior cells were already handled by `dim_pane_content`.
+            if x >= inner.x && x < inner.right() && y >= inner.y && y < inner.bottom() {
+                continue;
+            }
+            if x < area.x || x >= area.right() || y < area.y || y >= area.bottom() {
+                continue;
+            }
+            buf[(x, y)].set_bg(dimmed_bg);
         }
     }
 }
@@ -1536,6 +1593,176 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(1, 1)].style().fg, Some(app.palette.accent));
         assert_eq!(buffer[(2, 1)].style().fg, Some(app.palette.overlay0));
+    }
+
+    /// Build a two-pane, non-gap, bordered workspace with `pane_dim` on, focus
+    /// the left pane, render through the real `render_panes` path, and return the
+    /// rendered buffer plus the focused/inactive `PaneInfo`s and the expected
+    /// dimmed background color. Used by the chrome-dim characterization tests.
+    fn render_two_pane_dim_scene() -> (ratatui::buffer::Buffer, PaneInfo, PaneInfo, Color, Palette)
+    {
+        let mut app = AppState::test_new();
+        app.mode = Mode::Terminal;
+        app.pane_dim = true;
+        app.pane_borders = true;
+        app.pane_gaps = false;
+
+        let mut workspace = Workspace::test_new("test");
+        let left = workspace.tabs[0].root_pane;
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        // Focus the left pane so the right pane is the dimmed inactive one.
+        workspace.tabs[0].layout.focus_pane(left);
+        workspace.tabs[0].runtimes.insert(
+            left,
+            TerminalRuntime::test_with_scrollback_bytes(40, 8, 1024, b"ready\n"),
+        );
+        workspace.tabs[0].runtimes.insert(
+            right,
+            TerminalRuntime::test_with_scrollback_bytes(40, 8, 1024, b"ready\n"),
+        );
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+
+        let area = Rect::new(0, 0, 24, 6);
+        let terminal_runtimes = TerminalRuntimeRegistry::new();
+        let infos = compute_pane_infos(
+            &app,
+            &terminal_runtimes,
+            area,
+            false,
+            crate::kitty_graphics::HostCellSize::default(),
+        );
+        app.view.pane_infos = infos;
+        app.view.terminal_area = area;
+
+        // Expected chrome background: the same dimmed host Reset background that
+        // `dim_pane_content` produces for a Reset-bg interior cell.
+        let (_, dim_bg) = dim_fallback_colors(&app);
+        assert!(dim_bg.is_some(), "test needs a bg fallback to dim against");
+        let mut cache = HashMap::new();
+        let expected_bg = dim_color(Color::Reset, dim_bg, &app.host_ansi_palette, &mut cache)
+            .expect("dimmed reset background");
+
+        let focused = app
+            .view
+            .pane_infos
+            .iter()
+            .find(|i| i.id == left)
+            .expect("focused pane info")
+            .clone();
+        let inactive = app
+            .view
+            .pane_infos
+            .iter()
+            .find(|i| i.id == right)
+            .expect("inactive pane info")
+            .clone();
+        assert!(inactive.borders.contains(Borders::ALL));
+
+        let palette = app.palette.clone();
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(24, 6)).unwrap();
+        terminal
+            .draw(|frame| render_panes(&app, &terminal_runtimes, frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+
+        (buffer, focused, inactive, expected_bg, palette)
+    }
+
+    #[tokio::test]
+    async fn pane_dim_dims_inactive_pane_border_and_gutter_background() {
+        let (buffer, _focused, inactive, expected_bg, palette) = render_two_pane_dim_scene();
+        let r = inactive.rect;
+        let mid_x = r.x + r.width / 2;
+        let mid_y = r.y + r.height / 2;
+
+        // Every edge of the inactive pane's outer rect (the border ring) gets the
+        // dimmed host background, not the undimmed host background.
+        assert_eq!(
+            buffer[(mid_x, r.y)].style().bg,
+            Some(expected_bg),
+            "top border bg should be dimmed"
+        );
+        assert_eq!(
+            buffer[(mid_x, r.bottom() - 1)].style().bg,
+            Some(expected_bg),
+            "bottom border bg should be dimmed"
+        );
+        assert_eq!(
+            buffer[(r.right() - 1, mid_y)].style().bg,
+            Some(expected_bg),
+            "right border bg should be dimmed"
+        );
+
+        // The stable scrollbar gutter column (between content and the right
+        // border) is also chrome and must be dimmed.
+        let gutter_x = inactive.inner_rect.right();
+        assert!(
+            gutter_x < r.right() - 1,
+            "gutter column should sit inside the right border"
+        );
+        assert_eq!(
+            buffer[(gutter_x, mid_y)].style().bg,
+            Some(expected_bg),
+            "gutter bg should be dimmed"
+        );
+
+        // Border foreground stays the inactive color: dimming is background-only.
+        assert_eq!(
+            buffer[(mid_x, r.y)].style().fg,
+            Some(palette.overlay0),
+            "inactive border fg must stay overlay0"
+        );
+    }
+
+    #[tokio::test]
+    async fn pane_dim_dims_shared_divider_background_but_keeps_focus_accent() {
+        let (buffer, focused, inactive, expected_bg, palette) = render_two_pane_dim_scene();
+        let r = inactive.rect;
+        let mid_y = r.y + r.height / 2;
+
+        // `apply_pane_chrome` drops `Borders::RIGHT` from the left pane, so the
+        // single divider between the panes is the inactive pane's own left
+        // border. Its background dims with the rest of that pane's frame -
+        // otherwise it reads as an undimmed gap down the pane's left edge.
+        let shared_x = r.x;
+        assert_eq!(
+            focused.rect.x + focused.rect.width,
+            shared_x,
+            "left pane should abut the divider column"
+        );
+        assert!(
+            !focused.borders.contains(Borders::RIGHT),
+            "left pane should not draw its own right border"
+        );
+        assert_eq!(
+            buffer[(shared_x, mid_y)].style().bg,
+            Some(expected_bg),
+            "divider owned by the inactive pane must be dimmed"
+        );
+
+        // Dimming is background-only, so the divider keeps the focus accent that
+        // `render_pane_borders` gives borders touching the focused pane.
+        assert_eq!(
+            buffer[(shared_x, mid_y)].style().fg,
+            Some(palette.accent),
+            "divider fg must stay the focus accent"
+        );
+
+        // The focused pane's own chrome is never dimmed.
+        let f = focused.rect;
+        let f_mid_x = f.x + f.width / 2;
+        assert_ne!(
+            buffer[(f_mid_x, f.y)].style().bg,
+            Some(expected_bg),
+            "focused pane border must not be dimmed"
+        );
+        assert_ne!(
+            buffer[(f.x, mid_y)].style().bg,
+            Some(expected_bg),
+            "focused pane left border must not be dimmed"
+        );
     }
 
     #[tokio::test]
