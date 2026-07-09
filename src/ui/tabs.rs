@@ -22,8 +22,22 @@ pub(crate) struct TabBarView {
     pub new_tab_hit_area: Rect,
 }
 
-fn tab_width(ws: &crate::workspace::Workspace, tab_idx: usize, zoom_indicator: &str) -> u16 {
-    display_width_u16(&tab_chrome_label(ws, tab_idx, zoom_indicator))
+/// Cosmetic tab-label options sourced from `ui.*` config.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TabChrome<'a> {
+    pub zoom_indicator: &'a str,
+    pub number_prefix: &'a str,
+}
+
+pub(crate) fn tab_chrome(app: &AppState) -> TabChrome<'_> {
+    TabChrome {
+        zoom_indicator: &app.zoom_indicator,
+        number_prefix: &app.tab_number_prefix,
+    }
+}
+
+fn tab_width(ws: &crate::workspace::Workspace, tab_idx: usize, chrome: TabChrome<'_>) -> u16 {
+    display_width_u16(&tab_chrome_label(ws, tab_idx, chrome))
         .saturating_add(4)
         .max(MIN_TAB_WIDTH)
 }
@@ -31,13 +45,20 @@ fn tab_width(ws: &crate::workspace::Workspace, tab_idx: usize, zoom_indicator: &
 fn tab_chrome_label(
     ws: &crate::workspace::Workspace,
     tab_idx: usize,
-    zoom_indicator: &str,
+    chrome: TabChrome<'_>,
 ) -> String {
-    let name = ws
+    let mut name = ws
         .tab_display_name(tab_idx)
         .unwrap_or_else(|| (tab_idx + 1).to_string());
-    if !zoom_indicator.is_empty() && ws.tabs.get(tab_idx).is_some_and(|tab| tab.zoomed) {
-        format!("{name} {zoom_indicator}")
+    let custom_named = ws.tabs.get(tab_idx).is_some_and(|tab| !tab.is_auto_named());
+    if custom_named && !chrome.number_prefix.is_empty() {
+        let prefix = chrome
+            .number_prefix
+            .replace("{n}", &(tab_idx + 1).to_string());
+        name = format!("{prefix}{name}");
+    }
+    if !chrome.zoom_indicator.is_empty() && ws.tabs.get(tab_idx).is_some_and(|tab| tab.zoomed) {
+        format!("{name} {}", chrome.zoom_indicator)
     } else {
         name
     }
@@ -47,7 +68,7 @@ fn layout_tab_hit_areas(
     ws: &crate::workspace::Workspace,
     area: Rect,
     scroll: usize,
-    zoom_indicator: &str,
+    chrome: TabChrome<'_>,
 ) -> Vec<Rect> {
     let mut rects = vec![Rect::default(); ws.tabs.len()];
     if area.width == 0 || area.height == 0 {
@@ -60,7 +81,7 @@ fn layout_tab_hit_areas(
         if x >= right {
             break;
         }
-        let desired = tab_width(ws, idx, zoom_indicator);
+        let desired = tab_width(ws, idx, chrome);
         let remaining = right.saturating_sub(x);
         let width = desired.min(remaining).max(1);
         *rect = Rect::new(x, area.y, width, 1);
@@ -72,14 +93,14 @@ fn layout_tab_hit_areas(
 fn centered_tab_scroll(
     ws: &crate::workspace::Workspace,
     area: Rect,
-    zoom_indicator: &str,
+    chrome: TabChrome<'_>,
 ) -> usize {
     let mut best_scroll = ws.active_tab;
     let mut best_distance = u16::MAX;
     let viewport_center = area.x.saturating_mul(2).saturating_add(area.width);
 
     for scroll in 0..=ws.active_tab {
-        let rects = layout_tab_hit_areas(ws, area, scroll, zoom_indicator);
+        let rects = layout_tab_hit_areas(ws, area, scroll, chrome);
         let Some(active_rect) = rects.get(ws.active_tab).copied() else {
             continue;
         };
@@ -110,10 +131,10 @@ fn trailing_tab_controls_x(tab_hit_areas: &[Rect], fallback_x: u16) -> u16 {
         .unwrap_or(fallback_x)
 }
 
-fn max_tab_scroll(ws: &crate::workspace::Workspace, area: Rect, zoom_indicator: &str) -> usize {
+fn max_tab_scroll(ws: &crate::workspace::Workspace, area: Rect, chrome: TabChrome<'_>) -> usize {
     (0..ws.tabs.len())
         .find(|&scroll| {
-            layout_tab_hit_areas(ws, area, scroll, zoom_indicator)
+            layout_tab_hit_areas(ws, area, scroll, chrome)
                 .last()
                 .is_some_and(|rect| rect.width > 0)
         })
@@ -126,22 +147,22 @@ pub(crate) fn compute_tab_bar_view(
     current_scroll: usize,
     follow_active: bool,
     mouse_chrome: bool,
-    zoom_indicator: &str,
+    chrome: TabChrome<'_>,
 ) -> TabBarView {
     if area.width == 0 || area.height == 0 {
         return TabBarView::default();
     }
 
     if !mouse_chrome {
-        let max_scroll = max_tab_scroll(ws, area, zoom_indicator);
+        let max_scroll = max_tab_scroll(ws, area, chrome);
         let scroll = if follow_active {
-            centered_tab_scroll(ws, area, zoom_indicator).min(max_scroll)
+            centered_tab_scroll(ws, area, chrome).min(max_scroll)
         } else {
             current_scroll.min(max_scroll)
         };
         return TabBarView {
             scroll,
-            tab_hit_areas: layout_tab_hit_areas(ws, area, scroll, zoom_indicator),
+            tab_hit_areas: layout_tab_hit_areas(ws, area, scroll, chrome),
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area: Rect::default(),
@@ -155,7 +176,7 @@ pub(crate) fn compute_tab_bar_view(
         area.width.saturating_sub(NEW_TAB_WIDTH),
         area.height,
     );
-    let all_tabs = layout_tab_hit_areas(ws, all_tabs_area, 0, zoom_indicator);
+    let all_tabs = layout_tab_hit_areas(ws, all_tabs_area, 0, chrome);
     let overflow = all_tabs.iter().any(|rect| rect.width == 0);
     if !overflow {
         let new_tab_x = trailing_tab_controls_x(&all_tabs, area.x);
@@ -185,13 +206,13 @@ pub(crate) fn compute_tab_bar_view(
         area.height,
     );
 
-    let max_scroll = max_tab_scroll(ws, tab_area, zoom_indicator);
+    let max_scroll = max_tab_scroll(ws, tab_area, chrome);
     let scroll = if follow_active {
-        centered_tab_scroll(ws, tab_area, zoom_indicator).min(max_scroll)
+        centered_tab_scroll(ws, tab_area, chrome).min(max_scroll)
     } else {
         current_scroll.min(max_scroll)
     };
-    let tab_hit_areas = layout_tab_hit_areas(ws, tab_area, scroll, zoom_indicator);
+    let tab_hit_areas = layout_tab_hit_areas(ws, tab_area, scroll, chrome);
     let trailing_x = trailing_tab_controls_x(&tab_hit_areas, tab_area_x).min(tab_area_right);
     let right_hit_area = Rect::new(
         trailing_x,
@@ -351,7 +372,7 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
             Style::default().fg(p.overlay1).bg(p.surface0)
         };
         let width = rect.width as usize;
-        let name = tab_chrome_label(ws, idx, &app.zoom_indicator);
+        let name = tab_chrome_label(ws, idx, tab_chrome(app));
         let text = format!(" {:width$}", name, width = width.saturating_sub(1));
         frame.render_widget(Paragraph::new(text).style(style), rect);
     }
@@ -439,7 +460,7 @@ mod tests {
             0,
             true,
             false,
-            &app.zoom_indicator,
+            tab_chrome(&app),
         );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
@@ -465,8 +486,28 @@ mod tests {
         ws.tabs[0].set_custom_name("build".into());
         ws.tabs[0].zoomed = true;
 
-        assert_eq!(tab_chrome_label(&ws, 0, "Z"), "build Z");
-        assert_eq!(tab_chrome_label(&ws, 0, "•"), "build •");
+        assert_eq!(
+            tab_chrome_label(
+                &ws,
+                0,
+                TabChrome {
+                    zoom_indicator: "Z",
+                    number_prefix: "",
+                }
+            ),
+            "build Z"
+        );
+        assert_eq!(
+            tab_chrome_label(
+                &ws,
+                0,
+                TabChrome {
+                    zoom_indicator: "•",
+                    number_prefix: "",
+                }
+            ),
+            "build •"
+        );
     }
 
     #[test]
@@ -475,9 +516,13 @@ mod tests {
         ws.tabs[0].set_custom_name("build".into());
         ws.tabs[0].zoomed = true;
 
-        assert_eq!(tab_chrome_label(&ws, 0, ""), "build");
+        let chrome = TabChrome {
+            zoom_indicator: "",
+            number_prefix: "",
+        };
+        assert_eq!(tab_chrome_label(&ws, 0, chrome), "build");
         // Width should match an unmarked tab of the same name.
-        assert_eq!(tab_width(&ws, 0, ""), display_width_u16("build") + 4);
+        assert_eq!(tab_width(&ws, 0, chrome), display_width_u16("build") + 4);
     }
 
     #[test]
@@ -496,7 +541,7 @@ mod tests {
             0,
             true,
             false,
-            &app.zoom_indicator,
+            tab_chrome(&app),
         );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
@@ -525,7 +570,7 @@ mod tests {
             0,
             true,
             false,
-            &app.zoom_indicator,
+            tab_chrome(&app),
         );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
@@ -549,7 +594,11 @@ mod tests {
         ws.tabs[0].set_custom_name("abcdefgh".into());
         ws.tabs[0].zoomed = true;
 
-        assert_eq!(tab_width(&ws, 0, "Z"), 14);
+        let chrome = TabChrome {
+            zoom_indicator: "Z",
+            number_prefix: "",
+        };
+        assert_eq!(tab_width(&ws, 0, chrome), 14);
     }
 
     #[test]
@@ -557,8 +606,12 @@ mod tests {
         let mut ws = Workspace::test_new("test");
         ws.tabs[0].set_custom_name("提交 herdr 的反馈".into());
 
+        let chrome = TabChrome {
+            zoom_indicator: "Z",
+            number_prefix: "",
+        };
         assert_eq!(
-            tab_width(&ws, 0, "Z"),
+            tab_width(&ws, 0, chrome),
             display_width_u16("提交 herdr 的反馈") + 4
         );
     }
@@ -578,7 +631,7 @@ mod tests {
             0,
             true,
             false,
-            &app.zoom_indicator,
+            tab_chrome(&app),
         );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
@@ -590,5 +643,129 @@ mod tests {
 
         let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
         assert!(row.contains('馈'), "tab row: {row:?}");
+    }
+
+    #[test]
+    fn tab_number_prefix_prefixes_custom_named_tabs() {
+        let mut ws = Workspace::test_new("test");
+        ws.tabs[0].set_custom_name("build".into());
+
+        let chrome = TabChrome {
+            zoom_indicator: "Z",
+            number_prefix: "{n}: ",
+        };
+        assert_eq!(tab_chrome_label(&ws, 0, chrome), "1: build");
+    }
+
+    #[test]
+    fn tab_number_prefix_skips_auto_named_tabs() {
+        let ws = Workspace::test_new("test");
+
+        let chrome = TabChrome {
+            zoom_indicator: "Z",
+            number_prefix: "{n}: ",
+        };
+        assert_eq!(tab_chrome_label(&ws, 0, chrome), "1");
+    }
+
+    #[test]
+    fn tab_number_prefix_without_placeholder_is_static() {
+        let mut ws = Workspace::test_new("test");
+        ws.tabs[0].set_custom_name("build".into());
+
+        let chrome = TabChrome {
+            zoom_indicator: "Z",
+            number_prefix: "> ",
+        };
+        assert_eq!(tab_chrome_label(&ws, 0, chrome), "> build");
+    }
+
+    #[test]
+    fn tab_number_prefix_combines_with_zoom_indicator() {
+        let mut ws = Workspace::test_new("test");
+        ws.tabs[0].set_custom_name("build".into());
+        ws.tabs[0].zoomed = true;
+
+        let chrome = TabChrome {
+            zoom_indicator: "Z",
+            number_prefix: "{n}: ",
+        };
+        assert_eq!(tab_chrome_label(&ws, 0, chrome), "1: build Z");
+    }
+
+    #[test]
+    fn tab_number_prefix_shifts_after_close_and_move() {
+        let mut ws = Workspace::test_new("test");
+        ws.tabs[0].set_custom_name("a".into());
+        let b = ws.test_add_tab(Some("b"));
+        let c = ws.test_add_tab(Some("c"));
+        assert_eq!(b, 1);
+        assert_eq!(c, 2);
+
+        let chrome = TabChrome {
+            zoom_indicator: "Z",
+            number_prefix: "{n}: ",
+        };
+        assert_eq!(tab_chrome_label(&ws, 1, chrome), "2: b");
+
+        ws.close_tab(0);
+        assert_eq!(tab_chrome_label(&ws, 0, chrome), "1: b");
+        assert_eq!(tab_chrome_label(&ws, 1, chrome), "2: c");
+
+        ws.move_tab(1, 0);
+        assert_eq!(tab_chrome_label(&ws, 0, chrome), "1: c");
+        assert_eq!(tab_chrome_label(&ws, 1, chrome), "2: b");
+    }
+
+    #[test]
+    fn tab_number_prefix_counts_toward_tab_width() {
+        let mut ws = Workspace::test_new("test");
+        ws.tabs[0].set_custom_name("build".into());
+
+        let plain = TabChrome {
+            zoom_indicator: "",
+            number_prefix: "",
+        };
+        let prefixed = TabChrome {
+            zoom_indicator: "",
+            number_prefix: "{n}: ",
+        };
+        assert_eq!(tab_width(&ws, 0, plain), display_width_u16("build") + 4);
+        assert_eq!(
+            tab_width(&ws, 0, prefixed),
+            display_width_u16("1: build") + 4
+        );
+    }
+
+    #[test]
+    fn tab_bar_renders_number_prefix() {
+        let mut app = AppState::test_new();
+        app.tab_number_prefix = "{n}: ".into();
+        let mut ws = Workspace::test_new("test");
+        ws.tabs[0].set_custom_name("build".into());
+        ws.test_add_tab(Some("tests"));
+
+        app.workspaces = vec![ws];
+        app.active = Some(0);
+        app.view.tab_bar_rect = Rect::new(0, 0, 40, 1);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            tab_chrome(&app),
+        );
+        app.view.tab_hit_areas = view.tab_hit_areas;
+
+        let backend = TestBackend::new(40, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+            .unwrap();
+
+        let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
+        assert!(row.contains("1: build"), "tab row: {row:?}");
+        assert!(row.contains("2: tests"), "tab row: {row:?}");
     }
 }

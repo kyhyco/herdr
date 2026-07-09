@@ -1511,6 +1511,10 @@ pub struct AppState {
     pub pane_gaps: bool,
     /// Marker appended to a zoomed tab's label. Empty hides it. Sourced from `ui.zoom_indicator`.
     pub zoom_indicator: String,
+    /// Prefix prepended to a custom-named tab's label; `{n}` expands to the
+    /// tab's 1-based position. Empty disables it. Sourced from
+    /// `ui.tab_number_prefix`.
+    pub tab_number_prefix: String,
     pub show_agent_labels_on_pane_borders: bool,
     pub hide_tab_bar_when_single_tab: bool,
     pub pane_dim: bool,
@@ -1898,6 +1902,7 @@ impl AppState {
             pane_borders: true,
             pane_gaps: false,
             zoom_indicator: "Z".into(),
+            tab_number_prefix: String::new(),
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             pane_dim: false,
