@@ -1511,6 +1511,7 @@ pub struct AppState {
     pub pane_gaps: bool,
     pub show_agent_labels_on_pane_borders: bool,
     pub hide_tab_bar_when_single_tab: bool,
+    pub pane_dim: bool,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`. See `[experimental] reveal_hidden_cursor_for_cjk_ime`.
@@ -1581,6 +1582,11 @@ pub struct AppState {
     pub host_terminal_theme: TerminalTheme,
     /// Last known foreground host terminal cell size in pixels.
     pub(crate) host_cell_size: crate::kitty_graphics::HostCellSize,
+    /// Host terminal's 16 ANSI palette colors (OSC 4), when known. Used to
+    /// resolve indexed cell colors to real RGB for pane dimming so dimmed
+    /// indexed content matches the host's actual theme instead of a generic
+    /// fallback palette.
+    pub host_ansi_palette: crate::terminal_theme::AnsiPalette,
     /// Set when a persisted session snapshot would change.
     pub session_dirty: bool,
     /// Terminal runtimes that should be shut down by the app/runtime layer
@@ -1887,6 +1893,7 @@ impl AppState {
             pane_gaps: false,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
+            pane_dim: false,
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
             cjk_ime_agent_filter_configured: false,
@@ -1942,6 +1949,7 @@ impl AppState {
             global_menu: MenuListState::new(0),
             host_terminal_theme: TerminalTheme::default(),
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
+            host_ansi_palette: [None; crate::terminal_theme::HOST_ANSI_PALETTE_LEN],
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
         }

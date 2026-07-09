@@ -671,6 +671,12 @@
           "description": "Hide the tab row when the workspace has one tab."
         },
         {
+          "key": "ui.pane_dim",
+          "type": "boolean",
+          "default": "false",
+          "description": "Dim inactive split panes so the focused pane stands out, including while a pane is active in terminal mode."
+        },
+        {
           "key": "ui.agent_panel_sort",
           "type": "enum",
           "default": "\"spaces\"",

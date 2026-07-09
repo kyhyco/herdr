@@ -312,6 +312,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Hide the tab row when a workspace has exactly one tab.
 # New tabs can still be created with the configured keybinding.
 # hide_tab_bar_when_single_tab = false
+# Dim inactive split panes so the focused pane stands out, including in terminal mode.
+# pane_dim = false
 
 # Agent panel ordering: "spaces" (grouped by space) or "priority" (attention queue).
 # "workspaces" is accepted as an alias for "spaces".
