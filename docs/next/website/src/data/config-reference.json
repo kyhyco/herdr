@@ -671,6 +671,18 @@
           "description": "Hide the tab row when the workspace has one tab."
         },
         {
+          "key": "ui.zoom_indicator",
+          "type": "string",
+          "default": "\"Z\"",
+          "description": "Marker appended to a zoomed tab's label. Set any string (for example \"•\") to change the glyph, or \"\" to hide the marker."
+        },
+        {
+          "key": "ui.tab_number_prefix",
+          "type": "string",
+          "default": "\"\"",
+          "description": "Prefix prepended to a custom-named tab's label in the tab bar. `{n}` is replaced by the tab's 1-based position, so \"{n}: \" renders a tab named build as \"1: build\". Auto-named tabs already show their position and are never prefixed. Empty string disables the prefix."
+        },
+        {
           "key": "ui.pane_dim",
           "type": "boolean",
           "default": "false",
