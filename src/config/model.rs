@@ -816,6 +816,11 @@ pub struct UiConfig {
     /// Set to any string (for example "•" or ".") to change the glyph, or ""
     /// to hide the marker entirely.
     pub zoom_indicator: String,
+    /// Prefix prepended to a custom-named tab's label in the tab bar, with
+    /// `{n}` replaced by the tab's 1-based position (for example "{n}: "
+    /// renders "1: build"). Auto-named tabs already show their position.
+    /// Default: "" (disabled).
+    pub tab_number_prefix: String,
     /// Dim inactive split panes so the focused pane stands out, including while
     /// a pane is active in terminal mode. Default: false.
     pub pane_dim: bool,
@@ -1023,6 +1028,7 @@ impl Default for UiConfig {
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             zoom_indicator: "Z".into(),
+            tab_number_prefix: String::new(),
             pane_dim: false,
             pane_dim_exclude_processes: Vec::new(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,
@@ -1278,6 +1284,24 @@ pane_dim = true
     fn pane_dim_exclude_processes_defaults_empty() {
         let default_config = Config::default();
         assert!(default_config.ui.pane_dim_exclude_processes.is_empty());
+    }
+
+    #[test]
+    fn tab_number_prefix_defaults_empty() {
+        let default_config = Config::default();
+        assert!(default_config.ui.tab_number_prefix.is_empty());
+    }
+
+    #[test]
+    fn tab_number_prefix_parses_template() {
+        let config: Config = toml::from_str(
+            r#"
+[ui]
+tab_number_prefix = "{n}: "
+"#,
+        )
+        .expect("config should parse");
+        assert_eq!(config.ui.tab_number_prefix, "{n}: ");
     }
 
     #[test]

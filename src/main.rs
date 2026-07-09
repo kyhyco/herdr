@@ -317,6 +317,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Set any string (for example "•" or ".") to change the glyph, or "" to hide it.
 # zoom_indicator = "Z"
 
+# Prefix prepended to a custom-named tab's label; "{n}" is replaced by the
+# tab's 1-based position (for example "{n}: " renders "1: build").
+# Auto-named tabs already show their position, so they are never prefixed.
+# tab_number_prefix = ""
+
 # Dim inactive split panes so the focused pane stands out, including in terminal mode.
 # pane_dim = false
 
