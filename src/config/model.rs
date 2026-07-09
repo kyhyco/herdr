@@ -819,6 +819,11 @@ pub struct UiConfig {
     /// Dim inactive split panes so the focused pane stands out, including while
     /// a pane is active in terminal mode. Default: false.
     pub pane_dim: bool,
+    /// Foreground process names whose panes are exempt from inactive-pane
+    /// dimming (both `pane_dim` and the legacy dim). Matched by case-insensitive
+    /// basename, e.g. "nvim" matches `/usr/bin/nvim`. Default: empty.
+    #[serde(default)]
+    pub pane_dim_exclude_processes: Vec<String>,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
     /// Expanded sidebar row composition.
@@ -1019,6 +1024,7 @@ impl Default for UiConfig {
             hide_tab_bar_when_single_tab: false,
             zoom_indicator: "Z".into(),
             pane_dim: false,
+            pane_dim_exclude_processes: Vec::new(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
@@ -1266,6 +1272,26 @@ pane_dim = true
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert!(config.ui.pane_dim);
+    }
+
+    #[test]
+    fn pane_dim_exclude_processes_defaults_empty() {
+        let default_config = Config::default();
+        assert!(default_config.ui.pane_dim_exclude_processes.is_empty());
+    }
+
+    #[test]
+    fn pane_dim_exclude_processes_parses_list() {
+        let toml = r#"
+[ui]
+pane_dim = true
+pane_dim_exclude_processes = ["nvim", "vim"]
+"#;
+        let config: Config = toml::from_str(toml).expect("parse");
+        assert_eq!(
+            config.ui.pane_dim_exclude_processes,
+            vec!["nvim".to_string(), "vim".to_string()]
+        );
     }
 
     #[test]

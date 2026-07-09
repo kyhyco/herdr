@@ -432,6 +432,7 @@ struct ProcessProbeResult {
     foreground_is_pane_shell: bool,
     agent: Option<Agent>,
     process_name: Option<String>,
+    foreground_process_name: Option<String>,
 }
 
 fn agent_hint_for_foreground_job_members(
@@ -450,6 +451,16 @@ fn agent_hint_for_non_leader_foreground_job_members(
         .iter()
         .filter(|process| process.pid != job.process_group_id)
         .find_map(|process| read_hint(process.pid))
+}
+
+fn foreground_leader_name(job: &crate::platform::ForegroundJob) -> Option<String> {
+    let leader = job
+        .processes
+        .iter()
+        .find(|process| process.pid == job.process_group_id)
+        .or_else(|| job.processes.first())?;
+    let effective = leader.argv0.as_deref().unwrap_or(&leader.name);
+    (!effective.is_empty()).then(|| effective.to_string())
 }
 
 fn identify_process_group_leader_in_job(
@@ -477,6 +488,7 @@ fn process_probe_result(
         foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
         agent: Some(agent),
         process_name: Some(process_name),
+        foreground_process_name: foreground_leader_name(job),
     }
 }
 
@@ -538,6 +550,7 @@ fn probe_foreground_process_from_jobs(
             foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
             agent: identified.as_ref().map(|(agent, _)| *agent),
             process_name: identified.map(|(_, process_name)| process_name),
+            foreground_process_name: foreground_leader_name(job),
         };
     }
 
@@ -546,6 +559,7 @@ fn probe_foreground_process_from_jobs(
         foreground_is_pane_shell: false,
         agent: None,
         process_name: None,
+        foreground_process_name: None,
     }
 }
 
@@ -566,6 +580,7 @@ fn spawn_basic_detection_task(
     terminal: Arc<PaneTerminal>,
     detection_content_seq: Arc<AtomicU64>,
     full_lifecycle_authority_active: Arc<AtomicBool>,
+    foreground_process_name: Arc<Mutex<Option<String>>>,
     state_events: mpsc::Sender<AppEvent>,
 ) -> (
     tokio::task::AbortHandle,
@@ -669,6 +684,9 @@ fn spawn_basic_detection_task(
                 let had_process_probe = has_process_probe;
                 has_process_probe = true;
                 let probe = probe_foreground_process(pid, foreground_pgid);
+                if let Ok(mut current) = foreground_process_name.lock() {
+                    *current = probe.foreground_process_name;
+                }
                 let process_group_id = probe.process_group_id;
                 let foreground_is_pane_shell = probe.foreground_is_pane_shell;
                 let mut new_agent = probe.agent;
@@ -744,6 +762,10 @@ fn spawn_basic_detection_task(
                             agent_startup_grace_until = None;
                         }
                     }
+                }
+            } else if pid == 0 {
+                if let Ok(mut current) = foreground_process_name.lock() {
+                    *current = None;
                 }
             }
 
@@ -932,6 +954,7 @@ pub struct PaneRuntime {
     current_size: Cell<(u16, u16, u32, u32)>,
     child_pid: Arc<AtomicU32>,
     reported_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
+    foreground_process_name: Arc<Mutex<Option<String>>>,
     child_wait_completed: Option<Arc<AtomicBool>>,
     kitty_keyboard_flags: Arc<AtomicU16>,
     detection_content_seq: Arc<AtomicU64>,
@@ -1738,6 +1761,7 @@ impl PaneRuntime {
         let terminal = Arc::new(PaneTerminal::new(pane_terminal));
         let child_pid = Arc::new(AtomicU32::new(child_pid));
         let reported_cwd = Arc::new(Mutex::new(None));
+        let foreground_process_name = Arc::new(Mutex::new(None));
         let kitty_keyboard_flags = Arc::new(AtomicU16::new(keyboard_protocol_flags));
         let detection_content_seq = Arc::new(AtomicU64::new(0));
 
@@ -1807,6 +1831,7 @@ impl PaneRuntime {
             terminal.clone(),
             detection_content_seq.clone(),
             full_lifecycle_authority_active.clone(),
+            foreground_process_name.clone(),
             events,
         );
 
@@ -1817,6 +1842,7 @@ impl PaneRuntime {
             current_size: Cell::new((rows, cols, cell_width_px, cell_height_px)),
             child_pid,
             reported_cwd,
+            foreground_process_name,
             child_wait_completed: None,
             kitty_keyboard_flags,
             detection_content_seq,
@@ -1871,6 +1897,7 @@ impl PaneRuntime {
         // --- Child watcher task ---
         let child_pid = Arc::new(AtomicU32::new(0));
         let reported_cwd = Arc::new(Mutex::new(None));
+        let foreground_process_name = Arc::new(Mutex::new(None));
         let child_wait_completed = Arc::new(AtomicBool::new(false));
         let detection_content_seq = Arc::new(AtomicU64::new(0));
         let full_lifecycle_authority_active = Arc::new(AtomicBool::new(false));
@@ -1970,6 +1997,7 @@ impl PaneRuntime {
             const TICK_PENDING_RELEASE: Duration = Duration::from_millis(50);
 
             let child_pid = child_pid.clone();
+            let foreground_process_name_for_task = foreground_process_name.clone();
             let terminal = terminal.clone();
             let state_events = events.clone();
             let detection_content_seq = detection_content_seq.clone();
@@ -2086,6 +2114,9 @@ impl PaneRuntime {
                         has_process_probe = true;
                         if pid > 0 {
                             let probe = probe_foreground_process(pid, foreground_pgid);
+                            if let Ok(mut current) = foreground_process_name_for_task.lock() {
+                                *current = probe.foreground_process_name;
+                            }
                             let process_name = probe.process_name;
                             let process_group_id = probe.process_group_id;
                             let foreground_is_pane_shell = probe.foreground_is_pane_shell;
@@ -2188,6 +2219,10 @@ impl PaneRuntime {
                                 }
                                 agent_changed = true;
                             }
+                        }
+                    } else if pid == 0 {
+                        if let Ok(mut current) = foreground_process_name_for_task.lock() {
+                            *current = None;
                         }
                     }
 
@@ -2335,6 +2370,7 @@ impl PaneRuntime {
             current_size: Cell::new((rows, cols, 0, 0)),
             child_pid,
             reported_cwd,
+            foreground_process_name,
             child_wait_completed: Some(child_wait_completed),
             kitty_keyboard_flags,
             detection_content_seq,
@@ -2747,6 +2783,15 @@ impl PaneRuntime {
             None
         }
     }
+
+    /// Last probed foreground process-group leader name for this pane, if any.
+    /// Refreshed by the throttled detection probe, so reads are cheap.
+    pub fn foreground_process_name(&self) -> Option<String> {
+        self.foreground_process_name
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
 }
 
 #[cfg(test)]
@@ -2807,6 +2852,7 @@ impl PaneRuntime {
                 current_size: Cell::new((rows, cols, 0, 0)),
                 child_pid: Arc::new(AtomicU32::new(0)),
                 reported_cwd: Arc::new(Mutex::new(None)),
+                foreground_process_name: Arc::new(Mutex::new(None)),
                 child_wait_completed: None,
                 kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
                 detection_content_seq: Arc::new(AtomicU64::new(0)),
@@ -3305,6 +3351,7 @@ mod tests {
             current_size: Cell::new((80, 24, 0, 0)),
             child_pid: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
+            foreground_process_name: Arc::new(Mutex::new(None)),
             child_wait_completed: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
             detection_content_seq: Arc::new(AtomicU64::new(0)),
@@ -3336,6 +3383,7 @@ mod tests {
             current_size: Cell::new((80, 24, 0, 0)),
             child_pid: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
+            foreground_process_name: Arc::new(Mutex::new(None)),
             child_wait_completed: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
             detection_content_seq: Arc::new(AtomicU64::new(0)),
@@ -3491,6 +3539,27 @@ mod tests {
 
         assert_eq!(result.agent, Some(Agent::Codex));
         assert_eq!(result.process_name.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn probe_reports_foreground_leader_name_for_non_agent() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process(99, "nvim")],
+        };
+
+        let result =
+            probe_foreground_process_from_jobs(42, Some(99), None, || Some(job), |_pid| None);
+
+        assert_eq!(result.agent, None);
+        assert_eq!(result.foreground_process_name.as_deref(), Some("nvim"));
+    }
+
+    #[test]
+    fn probe_reports_no_foreground_name_without_job() {
+        let result = probe_foreground_process_from_jobs(42, Some(99), None, || None, |_pid| None);
+
+        assert_eq!(result.foreground_process_name, None);
     }
 
     #[test]

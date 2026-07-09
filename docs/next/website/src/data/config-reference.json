@@ -677,6 +677,12 @@
           "description": "Dim inactive split panes so the focused pane stands out, including while a pane is active in terminal mode."
         },
         {
+          "key": "ui.pane_dim_exclude_processes",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Foreground process names whose panes are never dimmed even when `pane_dim = true`. Matching is by case-insensitive basename, so \"nvim\" matches /usr/bin/nvim. Useful for programs that already dim themselves when inactive. Empty list dims every inactive pane."
+        },
+        {
           "key": "ui.agent_panel_sort",
           "type": "enum",
           "default": "\"spaces\"",

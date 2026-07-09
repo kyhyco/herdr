@@ -461,6 +461,11 @@ impl TerminalRuntime {
         self.0.foreground_cwd()
     }
 
+    /// Last probed foreground process-group leader name for this pane, if any.
+    pub fn foreground_process_name(&self) -> Option<String> {
+        self.0.foreground_process_name()
+    }
+
     pub fn child_pid(&self) -> Option<u32> {
         self.0.child_pid()
     }

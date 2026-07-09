@@ -317,6 +317,16 @@ pub fn foreground_process_group_id(child_pid: u32) -> Option<u32> {
     crate::platform::foreground_process_group_id(child_pid)
 }
 
+/// Reduce a process path or name to a stable match key: the lowercased
+/// basename with any trailing `.exe` removed. Used for user-facing process
+/// matching (e.g. dim exclusions).
+pub fn normalize_process_key(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let base = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed);
+    let base = base.strip_suffix(".exe").unwrap_or(base);
+    base.to_lowercase()
+}
+
 fn normalized_process_name(process: &crate::platform::ForegroundProcess) -> String {
     let effective = process.argv0.as_deref().unwrap_or(&process.name);
     let lower_effective = effective.to_lowercase();
@@ -1305,5 +1315,22 @@ mod tests {
         let tpgid: i32 = fields[5].parse().expect("tpgid should be a number");
         // In CI/test environments without a terminal, tpgid is typically -1
         let _ = tpgid;
+    }
+
+    #[test]
+    fn normalize_process_key_reduces_to_lowercase_basename() {
+        assert_eq!(normalize_process_key("nvim"), "nvim");
+        assert_eq!(normalize_process_key("/usr/bin/nvim"), "nvim");
+        assert_eq!(normalize_process_key("NVIM"), "nvim");
+        assert_eq!(
+            normalize_process_key(r"C:\Program Files\Vim\vim.exe"),
+            "vim"
+        );
+        assert_eq!(normalize_process_key("  nvim  "), "nvim");
+        // No substring matching: distinct programs stay distinct.
+        assert_ne!(
+            normalize_process_key("neovim"),
+            normalize_process_key("nvim")
+        );
     }
 }

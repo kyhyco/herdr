@@ -295,6 +295,18 @@ pub(super) fn compute_pane_infos(
     pane_infos
 }
 
+fn process_is_dim_excluded(
+    process_name: Option<&str>,
+    exclude: &std::collections::HashSet<String>,
+) -> bool {
+    if exclude.is_empty() {
+        return false;
+    }
+    process_name
+        .map(|name| exclude.contains(&crate::detect::normalize_process_key(name)))
+        .unwrap_or(false)
+}
+
 pub(super) fn render_panes(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
@@ -330,16 +342,25 @@ pub(super) fn render_panes(
             // stands out even without a border. Otherwise dim only outside
             // terminal mode, using the terminal's native DIM attribute.
             if !info.is_focused && multi_pane {
-                if app.pane_dim {
-                    dim_pane_content(
-                        frame,
-                        info.inner_rect,
-                        dim_fg_fallback,
-                        dim_bg_fallback,
-                        &app.host_ansi_palette,
+                // Guard on the empty set first so unconfigured setups skip the
+                // per-pane runtime name lookup (a mutex read) entirely.
+                let excluded = !app.pane_dim_exclude.is_empty()
+                    && process_is_dim_excluded(
+                        rt.foreground_process_name().as_deref(),
+                        &app.pane_dim_exclude,
                     );
-                } else if !terminal_active {
-                    dim_pane_with_modifier(frame, info.inner_rect);
+                if !excluded {
+                    if app.pane_dim {
+                        dim_pane_content(
+                            frame,
+                            info.inner_rect,
+                            dim_fg_fallback,
+                            dim_bg_fallback,
+                            &app.host_ansi_palette,
+                        );
+                    } else if !terminal_active {
+                        dim_pane_with_modifier(frame, info.inner_rect);
+                    }
                 }
             }
 
@@ -1233,6 +1254,20 @@ mod tests {
             &app.view.split_borders,
             frame,
         );
+    }
+
+    #[test]
+    fn pane_dim_exclusion_matches_normalized_process() {
+        let mut exclude = std::collections::HashSet::new();
+        exclude.insert("nvim".to_string());
+
+        assert!(process_is_dim_excluded(Some("/usr/bin/nvim"), &exclude));
+        assert!(process_is_dim_excluded(Some("NVIM"), &exclude));
+        assert!(!process_is_dim_excluded(Some("neovim"), &exclude));
+        assert!(!process_is_dim_excluded(None, &exclude));
+
+        let empty = std::collections::HashSet::new();
+        assert!(!process_is_dim_excluded(Some("nvim"), &empty));
     }
 
     #[test]

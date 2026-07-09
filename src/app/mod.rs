@@ -249,6 +249,17 @@ fn parse_cjk_ime_agents(names: &[String]) -> Vec<crate::detect::Agent> {
     out
 }
 
+/// Project `ui.pane_dim_exclude_processes` into a normalized lookup set of
+/// lowercased basename process keys. Empty entries after normalization (e.g.
+/// blank strings) are dropped; an empty result means "exclude nothing".
+fn pane_dim_exclude_set(ui: &crate::config::UiConfig) -> std::collections::HashSet<String> {
+    ui.pane_dim_exclude_processes
+        .iter()
+        .map(|raw| crate::detect::normalize_process_key(raw))
+        .filter(|key| !key.is_empty())
+        .collect()
+}
+
 fn normalize_theme_name(name: &str) -> String {
     name.to_lowercase().replace([' ', '_'], "-")
 }
@@ -627,6 +638,7 @@ impl App {
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             pane_dim: config.ui.pane_dim,
+            pane_dim_exclude: pane_dim_exclude_set(&config.ui),
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
@@ -1423,6 +1435,7 @@ impl App {
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.pane_dim = config.ui.pane_dim;
+                self.state.pane_dim_exclude = pane_dim_exclude_set(&config.ui);
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
@@ -1785,6 +1798,18 @@ mod tests {
             api_rx,
             crate::api::EventHub::default(),
         )
+    }
+
+    #[test]
+    fn pane_dim_exclude_set_normalizes_and_drops_empty() {
+        let ui = crate::config::UiConfig {
+            pane_dim_exclude_processes: vec!["NVIM".into(), "/usr/bin/vim".into(), "".into()],
+            ..Default::default()
+        };
+        let set = pane_dim_exclude_set(&ui);
+        assert!(set.contains("nvim"));
+        assert!(set.contains("vim"));
+        assert_eq!(set.len(), 2); // empty entry dropped
     }
 
     fn unique_temp_path(name: &str) -> std::path::PathBuf {

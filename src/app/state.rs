@@ -1514,6 +1514,10 @@ pub struct AppState {
     pub show_agent_labels_on_pane_borders: bool,
     pub hide_tab_bar_when_single_tab: bool,
     pub pane_dim: bool,
+    /// Normalized (lowercased basename) foreground process keys whose panes are
+    /// exempt from inactive-pane dimming. Sourced from
+    /// `ui.pane_dim_exclude_processes`. Empty excludes nothing.
+    pub pane_dim_exclude: std::collections::HashSet<String>,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`. See `[experimental] reveal_hidden_cursor_for_cjk_ime`.
@@ -1897,6 +1901,7 @@ impl AppState {
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             pane_dim: false,
+            pane_dim_exclude: std::collections::HashSet::new(),
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
             cjk_ime_agent_filter_configured: false,
