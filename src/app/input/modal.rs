@@ -360,21 +360,13 @@ fn workspace_create_label(input: &str, suggested_name: &str) -> Option<String> {
     (!name.is_empty() && name != suggested_name).then(|| name.to_string())
 }
 
-fn next_new_tab_default_name(state: &AppState) -> String {
-    state
-        .active
-        .and_then(|i| state.workspaces.get(i))
-        .map(|ws| (ws.tabs.len() + 1).to_string())
-        .unwrap_or_else(|| "1".to_string())
-}
-
 pub(super) fn open_new_tab_dialog(state: &mut AppState) {
     state.creating_new_tab = true;
     state.requested_new_tab_name = None;
     state.pending_workspace_create_cwd = None;
     state.rename_pane_target = None;
-    state.name_input = next_new_tab_default_name(state);
-    state.name_input_replace_on_type = true;
+    state.name_input.clear();
+    state.name_input_replace_on_type = false;
     state.mode = Mode::RenameTab;
 }
 
@@ -455,13 +447,11 @@ pub(super) fn apply_rename_action(state: &mut AppState, action: ModalAction) {
                 }
                 Mode::RenameTab if state.creating_new_tab => {
                     state.request_new_tab = true;
-                    let default_name = next_new_tab_default_name(state);
-                    state.requested_new_tab_name =
-                        if new_name.is_empty() || new_name == default_name {
-                            None
-                        } else {
-                            Some(new_name)
-                        };
+                    state.requested_new_tab_name = if new_name.is_empty() {
+                        None
+                    } else {
+                        Some(new_name)
+                    };
                 }
                 Mode::RenameTab => {
                     if let Some(ws_idx) = state.active {
@@ -967,8 +957,7 @@ impl App {
                 }
             }
             Mode::RenameTab if self.state.creating_new_tab => {
-                let default_name = next_new_tab_default_name(&self.state);
-                let label = if new_name.is_empty() || new_name == default_name {
+                let label = if new_name.is_empty() {
                     None
                 } else {
                     Some(new_name)
@@ -1830,7 +1819,20 @@ mod tests {
     }
 
     #[test]
-    fn saving_new_tab_dialog_with_default_name_keeps_tab_auto_named() {
+    fn new_tab_dialog_opens_with_empty_input() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.name_input = "stale".into();
+        state.name_input_replace_on_type = true;
+
+        open_new_tab_dialog(&mut state);
+
+        assert!(state.creating_new_tab);
+        assert_eq!(state.name_input, "");
+        assert!(!state.name_input_replace_on_type);
+    }
+
+    #[test]
+    fn saving_new_tab_dialog_with_empty_input_keeps_tab_auto_named() {
         let mut state = state_with_workspaces(&["test"]);
         open_new_tab_dialog(&mut state);
 
@@ -1846,7 +1848,27 @@ mod tests {
     }
 
     #[test]
-    fn closing_first_auto_tab_compacts_remaining_auto_tab_label_and_next_prompt() {
+    fn saving_new_tab_dialog_with_numeric_input_sets_custom_name() {
+        let mut state = state_with_workspaces(&["test"]);
+        open_new_tab_dialog(&mut state);
+
+        // "2" is what this tab would have been auto-named anyway; typing it is
+        // still an explicit choice and must stick.
+        handle_rename_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('2'), KeyModifiers::empty()),
+        );
+        handle_rename_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+
+        assert!(state.request_new_tab);
+        assert_eq!(state.requested_new_tab_name.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn closing_first_auto_tab_compacts_remaining_auto_tab_label() {
         let mut state = state_with_workspaces(&["test"]);
         open_new_tab_dialog(&mut state);
         handle_rename_key(
@@ -1866,9 +1888,6 @@ mod tests {
             Some("1")
         );
         assert!(state.workspaces[0].tabs[0].custom_name.is_none());
-
-        open_new_tab_dialog(&mut state);
-        assert_eq!(state.name_input, "2");
     }
 
     #[test]
