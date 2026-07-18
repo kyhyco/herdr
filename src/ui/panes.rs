@@ -1660,10 +1660,23 @@ mod tests {
         assert!(inactive.borders.contains(Borders::ALL));
 
         let palette = app.palette.clone();
+        let split_borders = app
+            .active
+            .and_then(|i| app.workspaces.get(i))
+            .map(|ws| ws.layout.splits(area))
+            .unwrap_or_default();
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(24, 6)).unwrap();
         terminal
-            .draw(|frame| render_panes(&app, &terminal_runtimes, frame, area))
+            .draw(|frame| {
+                render_panes(
+                    &app,
+                    &terminal_runtimes,
+                    frame,
+                    &app.view.pane_infos,
+                    &split_borders,
+                )
+            })
             .unwrap();
         let buffer = terminal.backend().buffer().clone();
 
